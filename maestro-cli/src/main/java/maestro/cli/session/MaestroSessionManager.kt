@@ -107,6 +107,9 @@ object MaestroSessionManager {
             selectedDevice = selectedDevice,
             connectToExistingSession = if (isStudio) {
                 false
+            } else if (driverHostPort != null) {
+                // Custom port specified → skip session store check for all devices
+                false
             } else {
                 SessionStore.default.hasActiveSessionForDevice(
                     sessionId,
@@ -153,16 +156,12 @@ object MaestroSessionManager {
         if (host == null) {
             val device = PickDeviceInteractor.pickDevice(deviceId, driverHostPort, platform, deviceIndex)
 
-            if (device.deviceType == Device.DeviceType.REAL && device.platform == Platform.IOS) {
-                // Physical iOS devices are not yet supported. The driver for them
-                // (ios.devicectl.DeviceControlIOSDevice) is an unfinished spike: almost every
-                // method is `TODO("Not yet implemented")`, so a run would build the driver with
-                // xcodebuild, install it, and only then blow up with NotImplementedError on the
-                // flow's first launchApp. Fail here instead, before any of that work happens.
+            // Physical iPhones are supported only with an externally started XCTest runner
+            // (xcodebuild test-without-building + port forward) reached via --driver-host-port.
+            if (device.deviceType == Device.DeviceType.REAL && device.platform == Platform.IOS && driverHostPort == null) {
                 throw CliError(
-                    "Physical iOS devices are not yet supported. Maestro runs iOS flows on " +
-                        "simulators only (physical devices are supported on Android).\n" +
-                        "Connected iPhone: ${device.description}"
+                    "Physical iOS devices need --driver-host-port pointing at a forwarded, already running " +
+                        "maestro XCTest runner.\nConnected iPhone: ${device.description}"
                 )
             }
             return SelectedDevice(
@@ -445,7 +444,8 @@ object MaestroSessionManager {
 
         return Maestro.ios(
             driver = iosDriver,
-            openDriver = openDriver || xcTestDevice.isShutdown(),
+            // Only check isShutdown() if not using custom driver port (avoids accessing driver files)
+            openDriver = if (driverHostPort != null) openDriver else (openDriver || xcTestDevice.isShutdown()),
         )
     }
 
